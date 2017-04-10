@@ -1,0 +1,648 @@
+---
+title: "A Fine Wine...and What Makes It So"
+author: "Brian"
+date: "April 5, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+chooseCRANmirror(graphics=FALSE, ind=1)
+knitr::opts_chunk$set(echo = TRUE)
+
+wine <- read.csv('wineQualityreds.csv')
+#install.packages('memisc')
+library(reshape2)
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+library(psych)
+library(dplyr)
+library(RCurl)
+library(bitops)
+library(memisc)
+```
+
+## Exploratory Data Analysis 
+
+This analysis will be structured as a stream of consciousness in that the 
+majority of it will be graphical looks at the variables behind a red wine 
+receiving a high quality rating.  For a more complete and polished summary
+of the analysis, please see the bottom three graphs for substantial findings.
+
+American wine making in the last 30 years has exploded and European wine making
+has existed for centuries at a very high level.  Behind all the of subjective
+decisions a wine maker decides, this dataset shows that there is also reason to
+look at the chemical side of when to determine its quality.  This dataset looks
+at nearly 1,600 wines and the 12 variables that accompany them.
+
+```{r cars}
+
+length(wine)
+nrow(wine)
+summary(wine)
+
+```
+
+## Univariate Plots
+
+One of our most common y variables will be quality.  Here is it's distribution,
+looking fairly normal in nature:
+
+```{r pressure, echo=FALSE}
+
+ggplot(wine, aes(x = quality)) +
+  geom_histogram(binwidth = 1)
+
+```
+
+As we'll be hoping to analyze many of the variables, it'll be good to take a 
+look at some additional distribtuions:
+
+```{r echo=FALSE}
+
+p1 <- ggplot(wine, aes(x = volatile.acidity)) +
+  geom_histogram(binwidth = .05)
+
+p2 <-ggplot(wine, aes(x = citric.acid)) +
+  geom_histogram(binwidth = .01)
+
+p3 <- ggplot(wine, aes(x = residual.sugar)) +
+  geom_histogram(binwidth = .1)
+
+p4 <- ggplot(wine, aes(x = total.sulfur.dioxide)) +
+  geom_histogram(binwidth = 5)
+
+p5 <- ggplot(wine, aes(x = pH)) +
+  geom_histogram(binwidth = .1)
+
+p6 <- ggplot(wine, aes(x = sulphates)) +
+  geom_histogram(binwidth = .1)
+
+p7 <- ggplot(wine, aes(x = alcohol)) +
+  geom_histogram(binwidth = .1)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, p7, ncol = 4)
+
+```
+
+This approach gives a solid sense of which variables will need to be transformed 
+once we start using them as well as a sense of where the majority of wines fall.
+Citric acid has a few outliers at 0 that might need to be cleaned up and pH 
+levels are all very 
+normally distributed. 
+
+I'd like to zoom in on the Citric acid outliers and see if we should remove them:
+
+```{r echo = FALSE}
+
+ggplot(wine, aes(x = citric.acid)) +
+  geom_histogram(binwidth = .01) +
+  coord_cartesian(xlim = .25)
+
+```
+
+Zooming in you can see there are well over 100 wines with 0 citric acid so I
+think it's safe to not consider them false data points.  Further reseach 
+has made it clear that wines often have no citric acid in them.  These points
+will stay put for now.
+
+I will now examine the residual sugars because of its long tail to the right.
+Perhaps it looks different without the outliers
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+ggplot(wine, aes(x = residual.sugar)) +
+  geom_histogram(binwidth = .1) +
+  xlim(0, quantile(wine$residual.sugar, .90))
+
+summary(wine$residual.sugar)
+
+```
+
+It is far more normal in distribution than it was before.  Looking at its 
+summary you can see the max of over 15.  I wonder why some wines have such
+extremely high residual sugar levels when so many of them are clustered 
+between 1.5 and 3.  
+
+```{r echo = FALSE}
+
+ggplot(wine, aes(sulphates)) + 
+  geom_histogram(binwidth = .01) +
+  scale_x_log10() +
+  ggtitle('sulphates (log10)')
+
+wine$sulphates.log10 <- log10(wine$sulphates)
+
+```
+
+This was interesting to transform the sulphates and get a more normal 
+distribution.  My eye was first drawn to this variable as I've heard people
+say that sulphates are the reason people in America get headaches when drinking
+red wine but in Europe they don't because they contain fewer sulphates. 
+A quick Google search said that was an oversimplification but I'm still 
+going to keep my eye on this variable.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(wine, aes(volatile.acidity)) + 
+  geom_histogram(binwidth = .01) +
+  scale_x_log10() +
+  ggtitle('volatile acidity (log10)')
+
+wine$va.log10 <- log10(wine$volatile.acidity)
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(wine, aes(residual.sugar)) + 
+  geom_histogram(binwidth = .1) +
+  coord_trans(x = 'log10')+
+  ggtitle('volatile acidity (log10)')
+
+wine$rs.log10 <- log10(wine$residual.sugar)
+```
+
+I went ahead and transformed 2 more variables in case it is needed when
+building a predictive model.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+summary(wine$alcohol)
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+ggplot(wine, aes(x = alcohol)) +
+  geom_histogram() +
+  ggtitle('alcohol')
+```
+
+
+Taking a quick look at alcohol's quantile stats you can see that the min amount
+of alcohol in a wine is 8.4 which means 8.4% of the wine's volume.  Alcohol % 
+is often discussed when talking about beverages and can often add a bitterness
+to a drink it the % is high which is why I'm interested in this variable.  
+The max of alcohol is 14.90 which leaves us with a great deal of variance with
+this variable and one that might prove to be powerful in prediction.
+
+
+```{r}
+
+sum(is.na(wine))
+
+```
+Before moving on I did a quick check of missing values in this dataset and it's
+abnormally complete.  This will make trusting the data a bit easier moving 
+forward.
+
+###Univariate Summary:
+What is the structure of your dataset?  
+There are 1,599 wines in the dataset with 12 features (fixed acidity, volative
+acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total 
+sulfur dioxide, density, pH, sulphates, alcohol, and quality). All variables
+are numeric variables.
+
+Other observations:  
+
+The mean quality rating is 6 on a scale of 1-8 (with no wine receiving below 
+a 3)  
+Most wines have relatively low residual sugars with a few outliers much higher
+than the majority  
+The median of pH falls at a 3.3 and it also the most common value  
+Alcoholic content in wines is most commonly around 9 and 10, at the 
+bottom of the spectrum  
+
+What is/are the main feature(s) of interest in your dataset?  
+The main features in the data set are quality, sulphates, and alcohol.  
+They are the most known variables and have great variability which I'm
+hoping will transfer into predictive power in a model.
+
+What other features in the dataset do you think will help support your
+investigation into your feature(s) of interest?  
+There is a chance that pH could also play into whether or not a 
+high quality score was received seeing as acidity can easily be tasted 
+in comparison to other variables such as density.
+
+Did you create any new variables from existing variables in the dataset?  
+I created two subsetted dataframes, one for dry wines and one for sweet wines. 
+My hope was that they would lead to quantitatively different quality ratings
+but their means are very close to each other.
+
+Of the features you investigated, were there any unusual distributions?
+Did you perform any operations on the data to tidy, adjust, or change the 
+form of the data? If so, why did you do this?
+There were a few unusual distributions that I tried to normalize so that 
+they could be more easily used in a regression model later on.  I transformed
+sulphates with a log10 so that it went from being skewed to normal.  I
+attempted to normalize alcohol but neither of the log10, sqrt, or reverse
+transformations truly made a difference.
+
+
+##Bivariate Analysis
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+wine.dry <- subset(wine, residual.sugar < 2.2)
+
+wine.sweet <- subset(wine, residual.sugar > 2.2)
+
+ggplot(wine.dry, aes(x = residual.sugar, y = quality)) +
+  geom_point()
+
+ggplot(wine.sweet, aes(x = residual.sugar, y = quality)) +
+  geom_point()
+
+summary(wine$quality)
+summary(wine.dry$quality)
+summary(wine.sweet$quality)
+
+```
+
+I wanted to take a look a the different on quality between'sweet' and 'dry'
+wines.  This seems to be determined by the amount of residual sugars left in 
+the wine after the alcohol has fermented.  To do so I created 2 new dataframes
+for each category of wine.  The median amount was 2.2 and so I classified wines
+with more than 2.2 as sweet and those with less as dry.  The  
+mean difference between the two groups was only .07 and without a significance
+test, I'm not sure it really tells us anything.  A dead end, but that's not
+uncommon in EDA.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+mat <- cor(wine)
+round(mat, 2)
+
+```
+
+The above correlation matrix allows us to very quickly spot variables that
+either have a positive or negative correation to each other.  Another type of
+visualization to see how variables interact is a plot matrix.
+Let's take a look at the inter-correlations below:
+
+```{r echo = FALSE}
+#ggpairs(wine, mapping = aes('psych'))
+
+wine$quality <- as.factor(wine$quality)
+
+p_ <- function(pm) {
+  if (interactive()) {
+    print(pm)
+  }
+  invisible()
+}
+
+#data(tips, package = "reshape")
+pm <- ggpairs(wine, c(3,10,12,14))
+p_(pm)
+#pm <- ggpairs(wine, upper = "blank")
+#p_(pm)
+
+pm
+```
+
+This plot shows that our inter-correlation of the independent variables is quite
+weak, which is a good thing for future modeling.  It also highlights the fact 
+that our distribution isn't too skewed except for alcohol.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+ggplot(wine, aes(x = fixed.acidity, y = pH)) +
+  geom_point()
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+cor.test(wine$fixed.acidity, wine$pH)
+```
+
+
+Here we see that two of our variables do have a strong interaction.  Fixed 
+acidity and pH which makes a lot of sense seeing as pH is our scale of how acid
+or base a substance is.  It is always good to see assumptions about variable 
+shown by statistical tests.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+ggplot(wine, aes(x=density, y = fixed.acidity)) + 
+  geom_point()
+```
+
+The density of wine seems fairly straightforward in reseach, the weight of
+the liquid by volume.  It seems to be affected by a few ingredients such as 
+alcohol, sugars, etc.  Here we see that it's either affecting the acidity or
+vice versa!
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(wine, aes(x=density, y = fixed.acidity)) + 
+  geom_point(alpha = 1/3)
+```
+
+After adjusting the plot to take a closer look at concentrations of the data
+points, you can see that a majority of the density data is between 0.995 and
+1.000.  And yet even in that tightly clustered range you can see the positive
+correlation with fixed.acidity.
+
+```{r echo = FALSE}
+
+
+ggplot(wine, aes(x=density, y = residual.sugar)) + 
+  geom_point()
+
+```
+
+```{r echo = FALSE}
+ggplot(wine, aes(x=density, y = residual.sugar)) + 
+  geom_point(alpha = 1/5)
+```
+
+Here again you can see the clustering of the density data but this time with a
+much weaker correlation to residual.sugar.  These variables with 
+intercorrelation are helpful to view because they start to paint a picture 
+of which variables might start to affect a regression model.  
+It's important to remember that highly correlated variables should not both be
+used in a linear regression model because that can cause undesired noise and
+interference.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+ggplot(wine, aes(x=alcohol, y = quality)) + 
+  geom_point()
+
+```
+
+THe above graph is the first between an independent variable and the dependent
+variable of quality.  The correlation between the two was .48 and so I expect
+to be using it to predict wine quality ratings.  It is a little more difficult
+in the above graph to visualize relatedness because of the categorical nature
+of the dependent variable.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+wine$quality <- as.numeric(wine$quality)
+
+ggplot(wine, aes(x=alcohol, y = quality)) + 
+  geom_point() +
+  #geom_jitter(position = position_jitter()) +
+  geom_jitter(width = 2, height = 1.5) +
+  geom_smooth(method = lm, color = 'green')
+```
+
+To help get a better picture of quality and alcohol's relationship despite the
+difficulty with dealing with a categorical variable, I jittered the plot and 
+added a linear best fit line.  You can clearly see the positive relationship
+between the two.
+
+```{r echo=FALSE}
+quality_groups <- group_by(wine, quality)
+
+wine.quality_groups <- summarize(quality_groups,
+                          alcohol_mean = mean(alcohol),
+                          pH_mean = mean(pH),
+                          sulphates_mean = mean(sulphates),
+                          n = n())
+
+wine.quality_groups <- arrange(wine.quality_groups, quality)
+
+head(wine.quality_groups)
+
+#summary(wine.quality_groups)
+```
+
+Grouping by quality gave me a clear look at how a few different variables (at 
+least their averages) interacted with the dependent variable.  The graphs
+above also accomplished this, but sometimes it's a bit clearer to see mean 
+comparisons in numerical format side by side.
+
+
+###Bivariate Summary
+####Talk about some of the relationships you observed in this part of the
+####investigation. How did the feature(s) of interest vary with other features in
+####the dataset?
+An interestingly strong correlation was between quality and alcohol at 0.48
+
+The second strongest correlatoin with quality was a negative correlation
+at -0.39
+
+Density seemed to correlate strongly with a few different variables with one
+of them being acidity. 
+
+The intercorrelation between the independent variables were all considerably
+weak as demonstrated in the plot matrix above.  
+
+Alcohol had a skewed distribution so I transformed it because of its potential
+power in future predictions due to its strong correlation with quality
+
+####Did you observe any interesting relationships between the other features
+I'm still fascinated a bit by density and its relationship with many different
+variables.  It has high correlations with volatile acidity and alcohol and 
+numerous moderate strength correlations to other variables.  It would seem as 
+though the density of a wine truly depends on several factors.
+
+####What was the strongest relationship you found?
+The strongest relationship found was between pH and fixed acidity with a 
+Pearson's r value of 0.68
+
+
+##Multivariate
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+wine$quality <- as.factor(wine$quality)
+
+p_ <- function(pm) {
+  if (interactive()) {
+    print(pm)
+  }
+  invisible()
+}
+
+#data(tips, package = "reshape")
+pm <- ggpairs(wine, c(3,5,9,10,11,12), 
+              mapping=ggplot2::aes(colour = quality),
+              legend = c(3,3))
+#p_(pm)
+#pm <- ggpairs(wine, upper = "blank")
+#p_(pm)
+
+pm
+```
+
+The plot matrix above adds an additional layer of detail when comparing 
+the characteristics of wine with its quality rating.  For instance, you can
+see that the filled in line graph for alcohol shows that many lower alcohol
+%s received the quality rating of 5.  This is why the correlation is so storng
+between the two.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(wine, aes(x = alcohol, y = volatile.acidity)) +
+  geom_point() + 
+  geom_jitter(position = position_jitter(), aes(color = quality))
+  #geom_jitter(aes(color = quality))
+```
+
+Seeing how strongly both volatile acidity and alcohol interacted with quality
+in the correlation matrix in the bivariate analysis, I wanted to see if both 
+interplayed at all with quality.  This scatter plot overlayed with quality
+as color shows us that with the heavy green color on the left and heavy light
+and dark blue on the right, that quality is dependent on these two variables.
+Because there is little variation though in the vertical sense, it also 
+seems to point that there quality is more heavily affected by alcohol and that
+volatile acidity simply seems to be lower with higher alcohol percentages.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+wine$quality <- as.numeric(wine$quality)
+
+attach(wine)
+regr1 <-lm(formula=quality~alcohol+chlorides+citric.acid+density+fixed.acidity+free.sulfur.dioxide+pH+rs.log10+total.sulfur.dioxide+sulphates.log10+va.log10)
+
+regr1
+```
+
+To start our linear modeling attempt, I simply add all of our variables into
+the model because none of them correlate strongly enough to add considerable 
+noise.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+summary(regr1)
+```
+
+Here we take a look at the model output.  The R squared (strength) of the model
+is 0.368 which is not very powerful.  That is to be considered give the fact 
+that we simply through all of our variables (plus one transformation) into it.
+The power of a model comes when unecessary variables are taken out.  By looking
+at the p values I narrowed down the model coefficients for round 2 below.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+regr2 <-lm(formula=quality~alcohol+chlorides+volatile.acidity+sulphates.log10
+           +pH+total.sulfur.dioxide+rs.log10+free.sulfur.dioxide+citric.acid)
+
+summary(regr2)
+```
+
+This time the model is able to predict over 37% of red wine qualities.  This is 
+not a considerably powerful model nor a marked improvement over the first model
+with its predictive power of 36%.  Further, more specific transformations of
+variables along with a great knowledge of wine industry could considerably
+improve this attempt.
+
+###Multivariate Summary
+
+####Talk about some of the relationships you observed in this part of the 
+####investigation. Were there features that strengthened each other in terms of
+####looking at your feature(s) of interest?
+The relationship between alcohol content and quality continued to be 
+strengthened by additional plots.  Even when weaving in volatile acidity,
+the correlation seemed to point more towards alcohol doing the work in adjusting
+quality. 
+
+####Were there any interesting or surprising interactions between features?
+I was suprised to see that multiple variables dealing with sulphur ended up
+being significant in the linear regression model that I ran.  I expected them 
+to be strongly correlated to each other but because that was not the case
+they did not seem to cause multiple collinearity in the model.
+
+####Did you create any models with your dataset? Discuss the
+####strengths and limitations of your model.
+I ran 2 linear regression models with the dataset both having the dependent
+variable be quality.  The first simply included
+all the variables and had an R squared value of .36  Being able to only predict
+36% of the data is not very strong.  After whittling down to just the 
+significant variables, the model rose to over 37% predicitve power.  Still not
+impressive which means a lot more work can be done with the dataset.
+
+##Final Plots and Summary
+###Plot 1
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(wine, aes(sulphates)) + 
+  geom_histogram(binwidth = .01) +
+  scale_x_log10() +
+  ggtitle('Log 10 of Sulphate')+
+  ylab('Number of Wines')+
+  xlab('Sulphate Levels') +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+```
+
+###Description 1
+The distribution of the sulphate variable is very skewed before transformation.
+This graph is a log10 transformation of it because of its significance in 
+regards to determing the quality of a red wine.
+
+##Plot 2
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+wine$quality <- as.factor(wine$quality)
+
+ggplot(wine, aes(x = alcohol, color = quality, fill = quality)) +
+  geom_density(alpha = 0.5) +
+  ggtitle('Alcohol % by Quality')+
+  xlab('Alcohol %') +
+  ylab('Percent of total')
+  
+
+```
+
+###Description Plot 2 
+The second plot is an extension of the plot matrix in the Multivariate Analysis
+section.  It is an easy way to identify the relationship between alcohol
+and quality as you can see that the majority of wines with a quality of 3
+are below 10% alcohol while many of the 5s and 6s are above 11.
+
+##Plot 3
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(wine, aes(x = alcohol, y = volatile.acidity)) +
+  geom_point() + 
+  geom_jitter(position = position_jitter(), aes(color = quality))+
+  xlim(9,14) +
+  ylim(.1, 1) +
+  ggtitle('Volatile Acidity Comparison with Alcohol')+
+  xlab('Alocohol %') +
+  ylab('Volatile Acidity')
+```
+
+### Description Plot 3
+This plot shows that both volatile acidity and alcohol play a part in the
+quality of a wine, but that alcohol is a stronger relationship.  In addition,
+wines that have more alcohol tend to have a lower volatile acidity.  The
+fact that alcohol is positively correlated with quality and volatile acidity
+is negatively correlated to quality is concisely shown in one graph.
+
+##Reflection
+The red wine quality dataset that I explored has nearly 1,600 datapoints to 
+examine spread out across 12 different variables.  The majority of the variables
+were numeric with one being factorl, the variable of quality. I first made 
+several histograms to get a feel for the distribution of the data and then 
+performed a few transformations on it to aide in eventually fitting it to a 
+linear regression model.  The data was very complete and did not take additional
+cleaning.
+
+I placed wines into 2 groups, one for sweet wines and one for dry wines.  This
+grouping did not seem to show any strong differences between the two.  I also
+group the wines based on their quality datapoint and looked at the differences
+in means of variables between them.  This was helpful confirmation when deciding
+on most powerful explanatory variables.
+
+I was unable to do as much intervariable analysis because so many of the 
+variables were numeric instead of factoral.  The fact that quality was
+factoral did help in the end as I examined a few plots with the extra layer of
+quality on top.
+
+Several variables stood out very quickly in terms of being highly correlated 
+with quality.  A correlation matrix was very helpful in determining those
+datapoints.  Alcohol, volatile acidity, and sulphates were all correlated with
+quality and ended up being variables in the regression model.  Suprisingly so,
+there were a few variables that also contributed to the model that I did not
+expect such as chlorides.  All told, though, the model was not very powerful
+and was able to only explain about 37% of the datapoints.
+
+The dataset does have its downsides with one of them being only one quality
+rating.  If the point of collecting so many different wines and their properties
+is to see which elements affect the rating they receive, it would be very 
+helpful to have 5 or more ratings and then to take an average of the spread. 
+Without this, one has to assume that the only quality rating a wine received
+is the absolute truth for that wine.  Lastly, the region breakdown of the wines
+would be helpful to examine. One place I read online said that this dataset
+all came from Portugal.  If that is the case, one could examine which wines
+have properties that are consistent with others in their area and if certain
+areas receive higher quality rankings than others.
+

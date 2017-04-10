@@ -1,0 +1,4 @@
+For assistance in coloring ggpairs by a variable:
+#https://www.rdocumentation.org/packages/GGally/versions/1.2.0/topics/ggpairs
+
+http://www.statmethods.net/stats/regression.html
